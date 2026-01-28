@@ -1,0 +1,78 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ff953f45bb9687245867d3889f6ffc85, type: 3}
+  m_Name: InventoryDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::InventoryDatabase
+  items:
+  - id: 1
+    displayName: Apple
+    description: Crunchy, shiny, and definitely not magical. Probably!
+    icon: {fileID: 21300000, guid: 84e5a44f91b2f354a95eb6b2d7cc2b51, type: 3}
+    category: 0
+    stackable: 1
+    onUseMessage: 
+  - id: 2
+    displayName: Raw Meat
+    description: "Fresh enough\u2026 for someone braver than you"
+    icon: {fileID: 21300000, guid: be82b942b1dbc5f49845312ec5b75349, type: 3}
+    category: 2
+    stackable: 1
+    onUseMessage: 
+  - id: 3
+    displayName: Iron Ingot
+    description: Heavy, cold, and impossible to carry politely
+    icon: {fileID: 21300000, guid: 9eb12f0c9203091459eeb643fd3589fa, type: 3}
+    category: 2
+    stackable: 1
+    onUseMessage: 
+  - id: 4
+    displayName: Magic Gem
+    description: Shiny enough to make bad decisions feel justified
+    icon: {fileID: 21300000, guid: 9fff215d0afc29747a34896b4c51d633, type: 3}
+    category: 2
+    stackable: 1
+    onUseMessage: 
+  - id: 5
+    displayName: Health Potion
+    description: Heals wounds, regrets sold separately
+    icon: {fileID: 21300000, guid: 88c5a08a129beed489a01d47a46ad625, type: 3}
+    category: 0
+    stackable: 1
+    onUseMessage: 
+  - id: 6
+    displayName: Mana Potion
+    description: Restores mana and questionable confidence
+    icon: {fileID: 21300000, guid: b19450f8c377b85408f4b93fa34bc066, type: 3}
+    category: 0
+    stackable: 1
+    onUseMessage: 
+  - id: 7
+    displayName: Enchanted Necklace
+    description: Looks expensive. Probably cursed
+    icon: {fileID: 21300000, guid: 980fe3a866f62314bb1404022ff2043e, type: 3}
+    category: 1
+    stackable: 0
+    onUseMessage: 
+  - id: 8
+    displayName: Golden Ring
+    description: One ring closer to responsibility
+    icon: {fileID: 21300000, guid: ecdb937425d8cdd49a917b39e8e65c79, type: 3}
+    category: 1
+    stackable: 0
+    onUseMessage: 
+  - id: 9
+    displayName: Ancient Spellbook
+    description: Ancient knowledge. Do not eat.
+    icon: {fileID: 21300000, guid: b8bcca0f59d576945b9d0768b65b35ed, type: 3}
+    category: 3
+    stackable: 0
+    onUseMessage: 

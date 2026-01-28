@@ -4,7 +4,7 @@
 PlayerSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 28
-  productGUID: 00000000000000000000000000000000
+  productGUID: e8b7bda94bd6fe549bd33dd95358dd17
   AndroidProfiler: 0
   AndroidFilterTouchesWhenObscured: 0
   AndroidEnableSustainedPerformanceMode: 0
@@ -885,7 +885,7 @@ PlayerSettings:
   cloudProjectId: 5465354b-302a-448b-b188-3ec0e4ef19da
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: 
+  projectName: CindySolano_Task
   organizationId: ccsccindycarolina
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
