@@ -6,15 +6,10 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/HappyHarvest/Scenes/MainMenu.unity
-    guid: 4b160fdf6533d5c469973189e95deede
+    path: Assets/_ProyectTask/Scene/Menu.unity
+    guid: 960024b66f1f4014b92c34d68b2f5780
   - enabled: 1
-    path: Assets/HappyHarvest/Scenes/Loader.unity
-    guid: 0c2d1b63d68b6084db7a03527005683a
-  - enabled: 1
-    path: Assets/HappyHarvest/Scenes/Farm_Outdoor.unity
-    guid: db7f147af7c21465ca337bc126944569
-  - enabled: 1
-    path: Assets/HappyHarvest/Scenes/House_Interior.unity
-    guid: 5eae6d8f741dc624395c4cd2e57cab18
+    path: Assets/_ProyectTask/Scene/TaskScene.unity
+    guid: f814ebd00e35c5c48becf532054d923a
   m_configObjects: {}
+  m_UseUCBPForAssetBundles: 0
