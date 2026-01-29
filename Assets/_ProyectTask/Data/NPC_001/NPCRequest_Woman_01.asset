@@ -20,6 +20,6 @@ MonoBehaviour:
   requirements:
   - itemId: 1
     amount: 2
-  - itemId: 5
+  - itemId: 2
     amount: 1
   nextRequest: {fileID: 11400000, guid: a9fb3b85e9af937459cdea3ff6fb8241, type: 2}

@@ -7,6 +7,7 @@ TagManager:
   - Slot
   - Item
   - DescriptionPanel
+  - Delete
   layers:
   - Default
   - TransparentFX

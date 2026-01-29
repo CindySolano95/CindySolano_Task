@@ -18,7 +18,7 @@ MonoBehaviour:
   missingItemsLine: Still missing.
   completeLine: "Nice. That sparkle is\u2026 reassuring."
   requirements:
-  - itemId: 6
+  - itemId: 7
     amount: 1
   - itemId: 4
     amount: 1
