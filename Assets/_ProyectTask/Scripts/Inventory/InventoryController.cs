@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -7,57 +8,90 @@ using UnityEngine.UI;
 
 public class InventoryController : MonoBehaviour
 {
+
+    // We store inventory as a fixed list of slots.
+    // Each slot can be empty or contain (itemId, amount).
+    // This guarantees "slot persistence": item position is stable across sessions.
+
     [Serializable]
-    public struct ItemStack
+    public struct SlotStack
     {
         public int id;
         public int amount;
 
-        public ItemStack(int id, int amount)
+        public bool IsEmpty => id <= 0 || amount <= 0;
+
+        public SlotStack(int id, int amount)
         {
             this.id = id;
             this.amount = amount;
         }
+
+        public static SlotStack Empty => new SlotStack(0, 0);
+    }
+
+    // This is the JSON structure written to disk.
+    // "slots" length should match the UI slot count, but we also handle mismatches
+    [Serializable]
+    private class InventorySaveData
+    {
+        public int version = 1;
+        public List<SlotStack> slots = new List<SlotStack>();
     }
 
     [Header("Data")]
     [SerializeField] private InventoryDatabase database;
-    [SerializeField] private List<ItemStack> items = new();
+
+    // used ONLY on first run when there is no save file.
+    // This allows you to start with some items for testing.
+    [SerializeField] private List<SlotStack> seedItems = new();
 
     [Header("UI Refs")]
     [SerializeField] private GraphicRaycaster graphicRaycaster;
-    [SerializeField] private RectTransform dragCanvasRoot;         // e.g. InventoryPanel root
-    [SerializeField] private RectTransform contentRoot;            // parent of slots (grid)
-    [SerializeField] private InventoryItemView itemPrefab;         // prefab with ItemImg + Number, etc
-    [SerializeField] private RectTransform tooltipRoot;            // DescriptionPanel root
-    [SerializeField] private TextMeshProUGUI tooltipTitle;         // child 0
-    [SerializeField] private TextMeshProUGUI tooltipBody;          // child 1
-
-    [Header("Optional")]
-    [SerializeField] private GameObject deletePanel;         
+    [SerializeField] private RectTransform dragCanvasRoot;
+    [SerializeField] private RectTransform contentRoot;
+    [SerializeField] private InventoryItemView itemPrefab;
     [SerializeField] private InventoryTooltip tooltip;
+
+    [Header("Save/Load")]
+    [SerializeField] private string saveFileName = "inventory_save.json";
 
     private readonly List<RaycastResult> _raycastResults = new();
     private PointerEventData _pointerEventData;
 
+    // Cached slot components in the UI (fixed order = persistence key)
     private readonly List<InventorySlot> _slots = new();
-    private readonly List<InventoryItemView> _pool = new();
 
+    // View pool: 1 view per slot, reused to avoid instantiate/destroy each refresh
+    private readonly List<InventoryItemView> _viewsBySlot = new();
+
+    // The actual runtime inventory model: 1 element per UI slot index.
+    // _slotItems[i] represents what is stored in slot i.
+    private List<SlotStack> _slotItems = new();
+
+    // Drag state (UI interaction)
     private InventoryItemView _draggingItem;
     private InventorySlot _dragOriginSlot;
+    private CanvasGroup _dragCanvasGroup;
+
+    private string SavePath => Path.Combine(Application.persistentDataPath, saveFileName);
+
 
     private void Awake()
     {
+        // PointerEventData uses the active EventSystem
         _pointerEventData = new PointerEventData(EventSystem.current);
 
-        CacheSlots();
+        // 1) Read and index UI slots (slot index is the persistence key)
+        CacheSlotsAndAssignIndexes();
 
-        if (deletePanel != null)
-            deletePanel.SetActive(false);
-    }
+        // 2) Build the 1-view-per-slot pool
+        EnsureViewsPool();
 
-    private void Start()
-    {
+        // 3) Load from disk if exists; otherwise seed (first run)
+        LoadOrCreate();
+
+        // 4) Render loaded runtime model into the UI
         RefreshUI();
     }
 
@@ -66,8 +100,18 @@ public class InventoryController : MonoBehaviour
         HandleDragAndDrop();
     }
 
+    private void OnApplicationQuit()
+    {
+        SaveToDisk();
+    }
+
+    private void OnDisable()
+    {
+        SaveToDisk();
+    }
+
     // ---------------------------
-    // Public API (Model)
+    // Public API (used by NPC + others)
     // ---------------------------
 
     /// <summary>
@@ -76,10 +120,10 @@ public class InventoryController : MonoBehaviour
     public int GetCount(int id)
     {
         int total = 0;
-        for (int i = 0; i < items.Count; i++)
+        for (int i = 0; i < _slotItems.Count; i++)
         {
-            if (items[i].id == id)
-                total += items[i].amount;
+            if (_slotItems[i].id == id && _slotItems[i].amount > 0)
+                total += _slotItems[i].amount;
         }
         return total;
     }
@@ -102,110 +146,168 @@ public class InventoryController : MonoBehaviour
             return;
         }
 
+        if (_slotItems == null || _slotItems.Count != _slots.Count)
+            ResizeModelToSlots();
+
         if (def.stackable)
         {
-            for (int i = 0; i < items.Count; i++)
+            // 1) Try find existing stack
+            for (int i = 0; i < _slotItems.Count; i++)
             {
-                if (items[i].id == id)
+                if (_slotItems[i].id == id && _slotItems[i].amount > 0)
                 {
-                    items[i] = new ItemStack(id, items[i].amount + amount);
+                    _slotItems[i] = new SlotStack(id, _slotItems[i].amount + amount);
+                    SaveToDisk();
                     RefreshUI();
                     return;
                 }
             }
 
-            items.Add(new ItemStack(id, amount));
-        }
-        else
-        {
-            // Non-stackable: add as many entries as amount
-            for (int i = 0; i < amount; i++)
-                items.Add(new ItemStack(id, 1));
+            // 2) Else place in first empty slot
+            int empty = FindFirstEmptySlot();
+            if (empty < 0)
+            {
+                Debug.LogWarning("[Inventory] No empty slots available.", this);
+                return;
+            }
+
+            _slotItems[empty] = new SlotStack(id, amount);
+            SaveToDisk();
+            RefreshUI();
+            return;
         }
 
+        // Non-stackable: add "amount" times into empty slots
+        int remaining = amount;
+        while (remaining > 0)
+        {
+            int empty = FindFirstEmptySlot();
+            if (empty < 0)
+            {
+                Debug.LogWarning("[Inventory] Not enough empty slots for non-stackable items.", this);
+                break;
+            }
+
+            _slotItems[empty] = new SlotStack(id, 1);
+            remaining--;
+        }
+
+        SaveToDisk();
         RefreshUI();
     }
 
     public void RemoveItem(int id, int amount)
     {
         if (amount <= 0) return;
+        if (_slotItems == null || _slotItems.Count == 0) return;
 
-        for (int i = 0; i < items.Count; i++)
+        int remaining = amount;
+
+        // Remove across slots (important for non-stackables)
+        for (int i = 0; i < _slotItems.Count && remaining > 0; i++)
         {
-            if (items[i].id != id) continue;
+            var s = _slotItems[i];
+            if (s.id != id || s.amount <= 0) continue;
 
-            var newAmount = items[i].amount - amount;
-            if (newAmount <= 0)
-                items.RemoveAt(i);
+            if (!database.TryGet(id, out var def))
+            {
+                // If definition missing, still remove safely
+                int take = Mathf.Min(remaining, s.amount);
+                s.amount -= take;
+                remaining -= take;
+                _slotItems[i] = s.amount <= 0 ? SlotStack.Empty : s;
+                continue;
+            }
+
+            if (def.stackable)
+            {
+                int take = Mathf.Min(remaining, s.amount);
+                s.amount -= take;
+                remaining -= take;
+                _slotItems[i] = s.amount <= 0 ? SlotStack.Empty : s;
+            }
             else
-                items[i] = new ItemStack(id, newAmount);
-
-            RefreshUI();
-            return;
+            {
+                // Each slot is one instance
+                _slotItems[i] = SlotStack.Empty;
+                remaining--;
+            }
         }
+
+        SaveToDisk();
+        RefreshUI();
     }
 
+
     // ---------------------------
-    // UI Build / Refresh
+    // Slots / UI
     // ---------------------------
 
-    private void CacheSlots()
+    /// <summary>
+    /// Reads all InventorySlot components under the contentRoot and assigns an index.
+    /// The index is the persistence key: slot 0 in UI = slot 0 in save file.
+    /// </summary>
+    private void CacheSlotsAndAssignIndexes()
     {
         _slots.Clear();
+
         for (int i = 0; i < contentRoot.childCount; i++)
         {
             var slot = contentRoot.GetChild(i).GetComponent<InventorySlot>();
-            if (slot != null) _slots.Add(slot);
+            if (slot == null) continue;
+
+            slot.SetIndex(_slots.Count);
+            _slots.Add(slot);
+        }
+    }
+
+    private void EnsureViewsPool()
+    {
+        _viewsBySlot.Clear();
+
+        for (int i = 0; i < _slots.Count; i++)
+        {
+            var view = Instantiate(itemPrefab);
+            view.Initialize(tooltip);
+            view.gameObject.SetActive(false);
+            _viewsBySlot.Add(view);
         }
     }
 
     private void RefreshUI()
     {
-        // Ensure pool size
-        while (_pool.Count < items.Count)
-        {
-            var view = Instantiate(itemPrefab);
-            SetupTooltipRefs(view);
-            view.Initialize(tooltip);
-            view.gameObject.SetActive(false);
-            _pool.Add(view);
-        }
+        if (_slotItems == null || _slotItems.Count != _slots.Count)
+            ResizeModelToSlots();
 
         // Clear all slots
-        foreach (var slot in _slots)
+        for (int i = 0; i < _slots.Count; i++)
         {
-            if (!slot.IsEmpty)
+            if (!_slots[i].IsEmpty)
             {
-                var oldItem = slot.Detach();
-                if (oldItem != null) oldItem.gameObject.SetActive(false);
+                var old = _slots[i].Detach();
+                if (old != null) old.gameObject.SetActive(false);
             }
         }
 
-        // Place items in slots
-        for (int i = 0; i < items.Count; i++)
+        // Place per-slot
+        for (int i = 0; i < _slots.Count; i++)
         {
-            if (i >= _slots.Count)
-            {
-                Debug.LogWarning("[Inventory] Not enough slots for current items.", this);
-                break;
-            }
+            var data = _slotItems[i];
+            if (data.IsEmpty) continue;
 
-            var stack = items[i];
-
-            if (!database.TryGet(stack.id, out var def))
+            if (!database.TryGet(data.id, out var def))
             {
-                Debug.LogError($"[Inventory] Missing definition for id: {stack.id}", this);
+                Debug.LogError($"[Inventory] Missing definition for id: {data.id}", this);
                 continue;
             }
 
-            var view = _pool[i];
-            view.Bind(def, stack.amount);
+            var view = _viewsBySlot[i];
+            view.Bind(def, data.amount);
             view.gameObject.SetActive(true);
 
             _slots[i].Attach(view);
 
-            // Optional legacy: click action via SendMessage
-            // (Better long-term: replace with ICommand/IItemAction interfaces)
+            // Optional legacy click action via SendMessage
             var button = view.GetComponentInChildren<Button>();
             if (button != null)
             {
@@ -215,27 +317,31 @@ public class InventoryController : MonoBehaviour
             }
         }
 
-        // Hide remaining pooled views not used
-        for (int i = items.Count; i < _pool.Count; i++)
-        {
-            if (_pool[i] != null) _pool[i].gameObject.SetActive(false);
-        }
-
-        if (tooltipRoot != null)
-            tooltipRoot.gameObject.SetActive(false);
+        tooltip?.Hide();
     }
 
-    private void SetupTooltipRefs(InventoryItemView view)
+    private int FindFirstEmptySlot()
     {
-        // Keeps the view reusable without static globals.
-        // Only needed once at instantiation time.
-        var so = view.GetType(); // no-op, avoids “unused” warnings if you later expand.
-
-        // Assign via serialized fields on the prefab if you prefer.
-        // If your prefab doesn't have them wired, you can wire them here by exposing setters.
-        // For simplicity, ensure the prefab has tooltip refs already assigned,
-        // OR make tooltip fields public setters.
+        for (int i = 0; i < _slotItems.Count; i++)
+        {
+            if (_slotItems[i].IsEmpty) return i;
+        }
+        return -1;
     }
+
+    private void ResizeModelToSlots()
+    {
+        if (_slotItems == null) _slotItems = new List<SlotStack>();
+
+        // Grow
+        while (_slotItems.Count < _slots.Count)
+            _slotItems.Add(SlotStack.Empty);
+
+        // Shrink (rare)
+        if (_slotItems.Count > _slots.Count)
+            _slotItems.RemoveRange(_slots.Count, _slotItems.Count - _slots.Count);
+    }
+
 
     // ---------------------------
     // Drag & Drop
@@ -245,7 +351,7 @@ public class InventoryController : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(0))
         {
-            tooltip.Hide();
+            tooltip?.Hide();
 
             var hitItem = RaycastForComponentInParents<InventoryItemView>();
             if (hitItem == null) return;
@@ -256,71 +362,230 @@ public class InventoryController : MonoBehaviour
             _draggingItem = hitItem;
             _dragOriginSlot = originSlot;
 
+            // While dragging, the item should not block raycasts,
+            // otherwise it can prevent detecting the slot under the cursor.
+            _dragCanvasGroup = _draggingItem.GetComponent<CanvasGroup>();
+            if (_dragCanvasGroup == null)
+                _dragCanvasGroup = _draggingItem.gameObject.AddComponent<CanvasGroup>();
+
+            _dragCanvasGroup.blocksRaycasts = false;
+
             originSlot.Detach();
             _draggingItem.transform.SetParent(dragCanvasRoot, worldPositionStays: false);
+            _draggingItem.transform.SetAsLastSibling();
         }
 
-        if (_draggingItem != null)
+        if (_draggingItem == null) return;
+
+        _draggingItem.GetComponent<RectTransform>().position = Input.mousePosition;
+
+        if (Input.GetMouseButtonUp(0))
         {
-            _draggingItem.GetComponent<RectTransform>().position = Input.mousePosition;
+            var targetSlot = RaycastForComponent<InventorySlot>();
 
-            if (Input.GetMouseButtonUp(0))
+            // No valid target -> return to origin (no model change)
+            if (targetSlot == null)
             {
-                var targetSlot = RaycastForComponent<InventorySlot>();
-
-                if (targetSlot == null)
-                {
-                    // No valid target: return to origin
-                    _dragOriginSlot.Attach(_draggingItem);
-                }
-                else if (targetSlot.IsEmpty)
-                {
-                    // Free slot: attach
-                    targetSlot.Attach(_draggingItem);
-                }
-                else
-                {
-                    // Occupied: stack if same id and stackable, else swap
-                    var other = targetSlot.CurrentItem;
-
-                    if (other.ItemId == _draggingItem.ItemId && _draggingItem.IsStackable)
-                    {
-                        other.SetAmount(other.Amount + _draggingItem.Amount);
-                        _dragOriginSlot.Attach(null);
-                        Destroy(_draggingItem.gameObject);
-
-                        // Also update model to stay consistent
-                        MergeInModel(_draggingItem.ItemId, _draggingItem.Amount);
-                    }
-                    else
-                    {
-                        // Swap views
-                        targetSlot.Detach();
-                        targetSlot.Attach(_draggingItem);
-                        _dragOriginSlot.Attach(other);
-                    }
-                }
-
-                _draggingItem.transform.localPosition = Vector3.zero;
-                _draggingItem = null;
-                _dragOriginSlot = null;
-            }
-        }
-    }
-
-    private void MergeInModel(int id, int amountAdded)
-    {
-        // Keeps the “data list” in sync after UI stacking.
-        for (int i = 0; i < items.Count; i++)
-        {
-            if (items[i].id == id)
-            {
-                items[i] = new ItemStack(id, items[i].amount + amountAdded);
+                _dragOriginSlot.Attach(_draggingItem);
+                EndDrag();
                 return;
             }
+
+            int a = _dragOriginSlot.SlotIndex;
+            int b = targetSlot.SlotIndex;
+
+            if (a < 0 || b < 0)
+            {
+                _dragOriginSlot.Attach(_draggingItem);
+                EndDrag();
+                return;
+            }
+
+            // Drop on empty slot: move model a -> b
+            if (targetSlot.IsEmpty)
+            {
+                MoveSlot(a, b);
+                SaveToDisk();
+
+                // IMPORTANT: stop dragging BEFORE RefreshUI rebuilds views.
+                // Otherwise the dragged object is still parented to dragCanvasRoot
+                // while RefreshUI detaches/attaches pooled views, causing visual glitches.
+                _draggingItem.gameObject.SetActive(false);
+                EndDrag();
+
+                RefreshUI();
+                return;
+            }
+
+            // Target occupied:
+            var targetItem = targetSlot.CurrentItem;
+
+            // Merge if same id + stackable
+            if (targetItem != null &&
+                targetItem.ItemId == _draggingItem.ItemId &&
+                _draggingItem.IsStackable)
+            {
+                var sb = _slotItems[b];
+                sb.amount += _draggingItem.Amount;
+                _slotItems[b] = sb;
+
+                _slotItems[a] = SlotStack.Empty;
+
+                SaveToDisk();
+
+                _draggingItem.gameObject.SetActive(false);
+                EndDrag();
+
+                RefreshUI();
+                return;
+            }
+
+            // Otherwise swap model a <-> b
+            SwapSlots(a, b);
+            SaveToDisk();
+
+            _draggingItem.gameObject.SetActive(false);
+            EndDrag();
+
+            RefreshUI();
         }
-        items.Add(new ItemStack(id, amountAdded));
     }
+
+    private void MoveSlot(int from, int to)
+    {
+        if (from == to) return;
+        var temp = _slotItems[from];
+        _slotItems[from] = SlotStack.Empty;
+        _slotItems[to] = temp;
+    }
+
+    private void SwapSlots(int a, int b)
+    {
+        if (a == b) return;
+        var tmp = _slotItems[a];
+        _slotItems[a] = _slotItems[b];
+        _slotItems[b] = tmp;
+    }
+
+    private void EndDrag()
+    {
+        if (_dragCanvasGroup != null)
+            _dragCanvasGroup.blocksRaycasts = true;
+
+        _draggingItem = null;
+        _dragOriginSlot = null;
+        _dragCanvasGroup = null;
+    }
+
+
+    // ---------------------------
+    // Save / Load
+    // ---------------------------
+
+    /// <summary>
+    /// Loads inventory automatically on startup.
+    /// If no save exists, seeds from inspector for first-run and saves immediately.
+    /// </summary>
+    private void LoadOrCreate()
+    {
+        ResizeModelToSlots();
+
+        if (File.Exists(SavePath))
+        {
+            LoadFromDisk();
+            // aseguramos tamaño correcto por si cambiaron #slots
+            ResizeModelToSlots();
+            return;
+        }
+
+        // If no save exists, seed from inspector (first run)
+        SeedFromInspector();
+        SaveToDisk();
+    }
+
+    // This does NOT run if a save file already exists.
+    private void SeedFromInspector()
+    {
+        // Seed sequentially into slots, preserving order, but only first time.
+        for (int i = 0; i < _slotItems.Count; i++)
+            _slotItems[i] = SlotStack.Empty;
+
+        int slot = 0;
+        for (int i = 0; i < seedItems.Count && slot < _slotItems.Count; i++)
+        {
+            var s = seedItems[i];
+            if (s.IsEmpty) continue;
+
+            _slotItems[slot] = s;
+            slot++;
+        }
+    }
+
+    // Writes the slot-based inventory snapshot to disk as JSON.
+    public void SaveToDisk()
+    {
+        try
+        {
+            var data = new InventorySaveData
+            {
+                version = 1,
+                slots = new List<SlotStack>(_slotItems)
+            };
+
+            var json = JsonUtility.ToJson(data, prettyPrint: true);
+
+            var dir = Path.GetDirectoryName(SavePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(SavePath, json);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[Inventory] Save failed: {e.Message}", this);
+        }
+    }
+
+    public void LoadFromDisk()
+    {
+        try
+        {
+            var json = File.ReadAllText(SavePath);
+            var data = JsonUtility.FromJson<InventorySaveData>(json);
+
+            if (data == null || data.slots == null)
+            {
+                Debug.LogWarning("[Inventory] Save file invalid. Recreating.", this);
+                SeedFromInspector();
+                return;
+            }
+
+            _slotItems = data.slots;
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[Inventory] Load failed: {e.Message}. Recreating.", this);
+            SeedFromInspector();
+        }
+    }
+
+    public void DeleteSave()
+    {
+        if (File.Exists(SavePath))
+            File.Delete(SavePath);
+
+        SeedFromInspector();
+        SaveToDisk();
+        RefreshUI();
+    }
+
+    // ---------------------------
+    // Raycast Helpers
+    // ---------------------------
+
+    // ---------------------------
+    // Raycast Helpers
+    // ---------------------------
 
     private T RaycastForComponent<T>() where T : Component
     {

@@ -5,13 +5,17 @@ public class InventorySlot : MonoBehaviour
 {
     [SerializeField] private Image slotBackground; // Your Slot Image (optional)
 
-    public InventoryItemView CurrentItem { get; private set; }
+    public int SlotIndex { get; private set; } = -1;
 
+    public InventoryItemView CurrentItem { get; private set; }
     public bool IsEmpty => CurrentItem == null;
+
+    public void SetIndex(int index) => SlotIndex = index;
 
     public void Attach(InventoryItemView item)
     {
         CurrentItem = item;
+
         if (item != null)
         {
             item.transform.SetParent(transform, worldPositionStays: false);
