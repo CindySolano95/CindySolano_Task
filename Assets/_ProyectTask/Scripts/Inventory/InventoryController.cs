@@ -74,6 +74,17 @@ public class InventoryController : MonoBehaviour
     private InventorySlot _dragOriginSlot;
     private CanvasGroup _dragCanvasGroup;
 
+    [Header("Delete UI")]
+    [SerializeField] private CartelEliminacion deleteConfirmPanel; // tu panel con slider/botones
+
+    // Delete workflow runtime
+    private bool _deletePromptOpen;
+    private InventoryItemView _pendingDeleteView;
+    private InventorySlot _pendingDeleteOriginSlot;
+    private int _pendingDeleteSlotIndex;
+    private int _pendingDeleteMaxAmount;
+
+
     private string SavePath => Path.Combine(Application.persistentDataPath, saveFileName);
 
 
@@ -381,6 +392,13 @@ public class InventoryController : MonoBehaviour
 
         if (Input.GetMouseButtonUp(0))
         {
+
+            if (IsPointerOverDeleteZone())
+            {
+                BeginDeleteFlow();
+                return;
+            }
+
             var targetSlot = RaycastForComponent<InventorySlot>();
 
             // No valid target -> return to origin (no model change)
@@ -475,6 +493,136 @@ public class InventoryController : MonoBehaviour
         _draggingItem = null;
         _dragOriginSlot = null;
         _dragCanvasGroup = null;
+    }
+
+    private bool IsPointerOverDeleteZone()
+    {
+        _raycastResults.Clear();
+        _pointerEventData.position = Input.mousePosition;
+        graphicRaycaster.Raycast(_pointerEventData, _raycastResults);
+
+        foreach (var r in _raycastResults)
+        {
+            // revisa el objeto y sus padres por si el tag está en el root del icono
+            if (r.gameObject != null && (r.gameObject.CompareTag("Delete") || r.gameObject.GetComponentInParent<Transform>().CompareTag("Delete")))
+                return true;
+
+            var t = r.gameObject != null ? r.gameObject.transform : null;
+            while (t != null)
+            {
+                if (t.CompareTag("Delete")) return true;
+                t = t.parent;
+            }
+        }
+        return false;
+    }
+
+    private void BeginDeleteFlow()
+    {
+        if (_draggingItem == null || _dragOriginSlot == null) return;
+
+        int slotIndex = _dragOriginSlot.SlotIndex;
+        if (slotIndex < 0 || slotIndex >= _slotItems.Count)
+        {
+            // fallback: vuelve al slot
+            _dragOriginSlot.Attach(_draggingItem);
+            EndDrag();
+            return;
+        }
+
+        var stack = _slotItems[slotIndex];
+        if (stack.IsEmpty)
+        {
+            // nada que borrar realmente
+            _dragOriginSlot.Attach(_draggingItem);
+            EndDrag();
+            return;
+        }
+
+        // Guardamos contexto para confirm/cancel
+        _deletePromptOpen = true;
+        _pendingDeleteView = _draggingItem;
+        _pendingDeleteOriginSlot = _dragOriginSlot;
+        _pendingDeleteSlotIndex = slotIndex;
+        _pendingDeleteMaxAmount = Mathf.Max(1, stack.amount);
+
+        // Congelamos el ítem visualmente (opcional: lo ocultas mientras decide)
+        _pendingDeleteView.gameObject.SetActive(false);
+
+        // Cortamos drag state para evitar glitches
+        EndDrag();
+
+        // Si solo hay 1, borrado inmediato
+        if (_pendingDeleteMaxAmount <= 1)
+        {
+            ConfirmDeleteAmount(1);
+            return;
+        }
+
+        // Si > 1: abrimos panel con slider
+        if (deleteConfirmPanel != null)
+        {
+            deleteConfirmPanel.Show(
+                maxAmount: _pendingDeleteMaxAmount,
+                onConfirm: ConfirmDeleteAmount,
+                onCancel: CancelDeleteFlow
+            );
+        }
+        else
+        {
+            // Sin panel asignado: por seguridad, no borramos y devolvemos
+            CancelDeleteFlow();
+        }
+    }
+
+    private void CancelDeleteFlow()
+    {
+        if (!_deletePromptOpen) return;
+
+        // Devuelve el view al slot original (modelo no se tocó)
+        if (_pendingDeleteOriginSlot != null && _pendingDeleteView != null)
+        {
+            _pendingDeleteView.gameObject.SetActive(true);
+            _pendingDeleteOriginSlot.Attach(_pendingDeleteView);
+        }
+
+        ClearDeleteContext();
+    }
+
+    private void ConfirmDeleteAmount(int amountToDelete)
+    {
+        if (!_deletePromptOpen) return;
+
+        amountToDelete = Mathf.Clamp(amountToDelete, 1, _pendingDeleteMaxAmount);
+
+        RemoveFromSlot(_pendingDeleteSlotIndex, amountToDelete);
+
+        SaveToDisk();
+        RefreshUI(); // reconstruye el view pool correctamente
+
+        ClearDeleteContext();
+    }
+
+    private void RemoveFromSlot(int slotIndex, int amount)
+    {
+        if (slotIndex < 0 || slotIndex >= _slotItems.Count) return;
+        if (amount <= 0) return;
+
+        var s = _slotItems[slotIndex];
+        if (s.IsEmpty) return;
+
+        s.amount -= amount;
+        if (s.amount <= 0) _slotItems[slotIndex] = SlotStack.Empty;
+        else _slotItems[slotIndex] = s;
+    }
+
+    private void ClearDeleteContext()
+    {
+        _deletePromptOpen = false;
+        _pendingDeleteView = null;
+        _pendingDeleteOriginSlot = null;
+        _pendingDeleteSlotIndex = -1;
+        _pendingDeleteMaxAmount = 0;
     }
 
 
@@ -578,10 +726,6 @@ public class InventoryController : MonoBehaviour
         SaveToDisk();
         RefreshUI();
     }
-
-    // ---------------------------
-    // Raycast Helpers
-    // ---------------------------
 
     // ---------------------------
     // Raycast Helpers
