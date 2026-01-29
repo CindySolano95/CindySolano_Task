@@ -19,6 +19,7 @@ public class InventoryPanelAnimator : MonoBehaviour
     [Header("Interaction While Visible")]
     [SerializeField] private bool blockRaycastsWhenVisible = true;
     [SerializeField] private bool interactableWhenVisible = true;
+    [SerializeField] TalkPromptView talkpromptView;
 
     private CanvasGroup _group;
     private Coroutine _routine;
@@ -62,6 +63,8 @@ public class InventoryPanelAnimator : MonoBehaviour
     {
         if (_isVisible) Hide();
         else Show();
+
+        talkpromptView.Hide();
     }
 
     // ---- Internals ----

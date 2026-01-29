@@ -63,6 +63,8 @@ public class PlayerHarvester : MonoBehaviour
     {
         _currentNode = node;
 
+        Debug.Log($"[PlayerHarvester] Node in range: {node.name}. Ready={node.IsReady()} PromptViewNull={promptView == null}");
+
         if (_currentNode != null && _currentNode.IsReady())
             promptView?.Show(_currentNode.PromptText);
         else
@@ -92,6 +94,8 @@ public class PlayerHarvester : MonoBehaviour
 
         // Hide prompt to avoid double presses while storing
         promptView?.Hide();
+
+        Debug.Log($"[PlayerHarvester] StoreAfterDelay done. floatingTextNull={floatingText == null} message='{afterStoreMessage}'");
 
         // Store into inventory after delay
         StartCoroutine(StoreAfterDelay(itemId, amount));
