@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 063e3a102770fcd45b0045053847e0ab, type: 3}
+  m_Name: NPCRequest_Woman_01
+  m_EditorClassIdentifier: Assembly-CSharp::NPCRequestSO
+  requestId: NPCRequest_Woman_01
+  startLine: "I\u2019m low on supplies. Bring me a few basics, please."
+  inProgressLine: Did you bring what I asked for? My patience has a cooldown.
+  missingItemsLine: Not quite. You're still missing things.
+  completeLine: Perfect! You may now continue making risky life choices.
+  requirements:
+  - itemId: 1
+    amount: 2
+  - itemId: 5
+    amount: 1
+  nextRequest: {fileID: 11400000, guid: a9fb3b85e9af937459cdea3ff6fb8241, type: 2}

@@ -70,6 +70,28 @@ public class InventoryController : MonoBehaviour
     // Public API (Model)
     // ---------------------------
 
+    /// <summary>
+    /// Returns how many of a given item ID the player currently has.
+    /// </summary>
+    public int GetCount(int id)
+    {
+        int total = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i].id == id)
+                total += items[i].amount;
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// True if the player has at least 'amount' of the given item.
+    /// </summary>
+    public bool HasItem(int id, int amount)
+    {
+        return GetCount(id) >= amount;
+    }
+
     public void AddItem(int id, int amount)
     {
         if (amount <= 0) return;

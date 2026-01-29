@@ -9,7 +9,7 @@ public class ItemSuelto : MonoBehaviour
 
     private void Update()
     {
-        if(Input.GetKeyDown(KeyCode.A)) InstanceRandomItem();
+        if(Input.GetKeyDown(KeyCode.L)) InstanceRandomItem();
     }
     private void OnTriggerEnter2D(Collider2D collision)
     {
